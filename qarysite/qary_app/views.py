@@ -34,7 +34,7 @@ class API_objects_details(generics.RetrieveUpdateDestroyAPIView):
 
 def team(request):
 
-    return render(request, "test.html")
+    return render(request, "team.html")
 
 
 def nlpia(request):
