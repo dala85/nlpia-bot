@@ -8,7 +8,7 @@ import zipfile
 from multiprocessing import cpu_count
 
 from qary.skills.qa_models import QuestionAnsweringModel
-from qary.constants import DATA_DIR, USE_CUDA, args
+from qary.constants import DATA_DIR, USE_CUDA, MIDATA_URL, MIDATA_QA_MODEL_DIR, args
 from qary.skills.basebots import ContextBot
 from qary.etl.netutils import DownloadProgressBar
 from qary.etl import scrape_wikipedia
@@ -32,7 +32,8 @@ class Bot(ContextBot):
                 self.transformer_loggers[-1].setLevel(logging.ERROR)
 
         qa_model = args.qa_model
-        url_str = f"http://totalgood.org/midata/models/qa/{qa_model}.zip"
+        url_str = f"{MIDATA_URL}/{MIDATA_QA_MODEL_DIR}/{qa_model}.zip"
+        log.warning(f"Attempting to download url: {url_str}")
         model_dir = os.path.join(DATA_DIR, 'qa-models', f"{qa_model}")
         model_type = qa_model.split('-')[0].lower()
         if not os.path.isdir(model_dir):
@@ -100,15 +101,29 @@ class Bot(ContextBot):
         return output[0]['probability'], output[0]['answer']
 
     def reply(self, statement, context=None, **kwargs):
-        """ Use context document + BERT to answer question in statement """
-        log.warning(f"qa_bot.reply(statement={statement}, context={context})")
+        """ Use context document + BERT to answer question in statement
+
+        context is a nested dictionary with two ways to specify the documents for a BERT context:
+        {docs: ['doc text 1', '...', ...]}
+        or
+        {doc: {text: 'document text ...'}}
+        """
+        log.warning(f"ContextBot.reply(statement={statement}, context={context})")
+        # this should call self.update_context(context=context) internally:
+        if context is None:
+            gendocs = scrape_wikipedia.find_article_texts(
+                query=statement,
+                max_articles=1, max_depth=1,
+                ngrams=3,
+                ignore='who what when where why'.split()) or []
+            context = dict(doc=dict(text=next(gendocs)))
         responses = super().reply(statement=statement, context=context, **kwargs) or []
-        docs = [self.context['doc']['text']]
-        if not docs or not any(len(d.strip()) for d in docs):
-            docs = scrape_wikipedia.find_article_texts(query=statement, max_articles=1, max_depth=1, ngrams=3,
-                                                       ignore='who what when where why'.split())
+        log.warning(f"super() responses: {responses}")
+        docs = self.context.get('docs') or [self.context['doc']['text']]
         for text in docs:
             log.info(f"text from context['doc']['text'] or wikipedia scrape: {text}")
+
+            super().update_context(context=dict(doc=dict(text=text)))
             if len(text.strip()) < 2:
                 log.warning(f'Context document text was too short: "{text}"')
                 continue

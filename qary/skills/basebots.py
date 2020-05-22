@@ -7,7 +7,7 @@ import zipfile
 # from multiprocessing import cpu_count
 
 from qary.etl.netutils import DownloadProgressBar
-from qary.constants import DATA_DIR, args  # , USE_CUDA
+from qary.constants import DATA_DIR, MIDATA_URL, MIDATA_QA_MODEL_DIR, args  # , USE_CUDA
 from qary.etl.nesting import dict_merge
 
 
@@ -102,20 +102,18 @@ class ContextBot:
             self.update_context(context)
 
     def update_context(self, context=None):
-        logging.warning(f"Reseting self.context using context: {context}")
+        logging.warning(f"Updating self.context using context: {context}")
         if isinstance(context, str):
             context = {'doc': {'text': context}}
-        context = {} if context is None else context
+        context = {} if context is None else dict(context)
         dict_merge(self.context, context)
         logging.warning(f"Updated self.context: {self.context}")
         return self.context
 
     def reset_context(self, context=None):
         self.context = {'args': self.args}
-        if isinstance(context, str):
-            context = {'doc': {'text': context}}
-        dict_merge(self.context, context)
-        logging.warning(f"Reset self.context: {self.context}")
+        logging.warning(f"Reset self.context to self.context={self.context} before updating with {context}")
+        self.update_context(context=context)
         return self.context
 
     def reply(self, statement, context=None):
@@ -173,20 +171,21 @@ class TransformerBot(HistoryBot, ContextBot):
                 self.transformer_loggers[-1].setLevel(logging.ERROR)
 
         qa_model = args.qa_model
-        url_str = f"http://totalgood.org/midata/models/qa/{qa_model}.zip"
+        url_str = f"{MIDATA_URL}/{MIDATA_QA_MODEL_DIR}/{qa_model}.zip"
+        log.warning(f"Attempting to download url: {url_str}")
         model_dir = os.path.join(DATA_DIR, 'qa-models', f"{qa_model}")
         model_type = qa_model.split('-')[0].lower()
         if not os.path.isdir(model_dir):
             os.makedirs(model_dir)
 
-        if (
-            not os.path.exists(os.path.join(model_dir, 'config.json')) or
-            not os.path.exists(os.path.join(model_dir, 'pytorch_model.bin')) or
-            not os.path.exists(os.path.join(model_dir, 'tokenizer_config.json')) or
-            not os.path.exists(os.path.join(model_dir, 'version.json')) or
-            (model_type == 'bert' and not os.path.exists(os.path.join(model_dir, 'vocab.txt'))) or
-            (model_type == 'albert' and not os.path.exists(os.path.join(model_dir, 'spiece.model')))
-        ):
+        if not all((
+            os.path.exists(os.path.join(model_dir, 'config.json')),
+            os.path.exists(os.path.join(model_dir, 'pytorch_model.bin')),
+            os.path.exists(os.path.join(model_dir, 'tokenizer_config.json')),
+            os.path.exists(os.path.join(model_dir, 'version.json')),
+            any((model_type == 'bert' and os.path.exists(os.path.join(model_dir, 'vocab.txt'))),
+                (model_type == 'albert' and os.path.exists(os.path.join(model_dir, 'spiece.model')))),
+        )):
             zip_local_path = os.path.join(DATA_DIR, 'qa-models', f"{qa_model}.zip")
             with DownloadProgressBar(unit='B', unit_scale=True, miniters=1, desc=url_str.split('/')[-1]) as t:
                 urllib.request.urlretrieve(url_str, filename=zip_local_path, reporthook=t.update_to)
